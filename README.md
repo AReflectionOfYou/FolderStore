@@ -32,6 +32,9 @@ section 11, for the open questions that prototyping is meant to answer).
 
 ## Getting started
 
+See [docs/setup.md](docs/setup.md) for registering a Dropbox app or a Google
+Drive OAuth client before connecting those adapters.
+
 ```sh
 npm install
 
@@ -40,11 +43,11 @@ npm run cli -- --provider local --root ./sandbox list
 npm run cli -- --provider local --root ./sandbox write hello.txt ./README.md
 npm run cli -- --provider local --root ./sandbox list
 
-# Dropbox — needs an app registered at https://www.dropbox.com/developers/apps
+# Dropbox — see docs/setup.md for how to register an app and get an app key
 npm run cli -- auth-dropbox --app-key <your-app-key>
 npm run cli -- --provider dropbox --root /FolderStoreTest list
 
-# Google Drive — needs an OAuth client at https://console.cloud.google.com
+# Google Drive — see docs/setup.md for how to register an OAuth client
 npm run cli -- auth-gdrive --client-id <your-client-id> --client-secret <your-client-secret>
 npm run cli -- --provider gdrive --root-folder-id <a-drive-folder-id> list
 
