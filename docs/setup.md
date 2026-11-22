@@ -119,10 +119,12 @@ them, or look into applying for production status.
 ## Where the token goes
 
 Both flows save to `.folderstore/credentials.json` in the directory you ran
-the command from (already in `.gitignore` — never commit this file). Right
-now that means the Dropbox/Drive sign-in is scoped to wherever you ran the
-`auth-*` command; if another app on your machine (like Photo Stories) needs
-the same sign-in, run the command again from that app's directory, or point
-it at the same credentials file. We're considering moving this to a
-single, machine-wide location so one sign-in covers every FolderStore-based
-app automatically — not done yet.
+the command from (already in `.gitignore` — never commit this file). That
+means the sign-in is scoped to that directory: a different app managing a
+different project folder — Photo Stories, say — runs its own `auth-dropbox`
+or `auth-gdrive` once, from its own directory. This is deliberate, not a
+limitation to work around: each app's shared folder is expected to be its
+own project anyway, so each app does its own one-time setup. If you ever do
+want one sign-in to cover two apps pointed at the *same* project folder, you
+can point `loadCredentials`/`saveCredentials` at a shared path explicitly
+instead of the per-directory default.
