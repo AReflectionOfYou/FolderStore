@@ -1,0 +1,19 @@
+{
+  "name": "folderstore",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "cli": "tsx apps/cli/src/index.ts",
+    "web": "tsx apps/web/src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

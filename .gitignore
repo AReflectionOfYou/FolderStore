@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.folderstore/
+*.log
+.DS_Store
