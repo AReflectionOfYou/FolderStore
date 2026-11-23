@@ -55,8 +55,9 @@ will say storage is not configured yet; that's the next step.
    one folder, `Apps/<your app name>/`, never the rest of your Dropbox.
 3. Name it (names are global, so add something distinctive, e.g. "Smith Family Photos").
 4. **Permissions** tab: enable `files.metadata.read`, `files.metadata.write`,
-   `files.content.read`, `files.content.write`, then click **Submit**. Do this
-   before connecting; permissions are fixed when you approve access.
+   `files.content.read`, `files.content.write`, then click **Save changes**
+   (upper right). Do this before connecting; permissions are fixed when you
+   approve access.
 5. **Settings** tab, **OAuth 2 → Redirect URIs**: add
    `https://<your gateway>/api/admin/connect/callback` exactly. The setup page shows this address so you can copy it.
 6. Still on **Settings**, copy the **App key** and **App secret**, and add them to the gateway:

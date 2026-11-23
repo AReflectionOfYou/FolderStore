@@ -266,13 +266,13 @@ The tracer bullet is Dropbox, Cloudflare Workers, and signed links with no expir
 5. Upload a video over 4 MB; confirm it goes direct to Dropbox.
 6. Point Photo Stories (or the wedding uploader) at the gateway with `APP_URL` and upload through it.
 
-**Status (this branch):** the gateway, Dropbox and Drive adapters, local adapter, dev server, CLI, and tests exist. Steps 1–5 need a real Dropbox account and Cloudflare deploy to verify; the Drive adapter is untested against a real account.
+**Status (2026-11-22):** steps 1–5 verified on a real Dropbox account and Cloudflare deploy: proxied and direct uploads, read-back, listing, upload-only guest links refused for listing and for writing outside their folder, and never-overwrite on both paths (a same-name write with different bytes is disambiguated; identical bytes are a Dropbox no-op; a direct upload onto an existing name fails with 409). Step 6 waits on the client library. The Drive adapter is still untested against a real account.
 
 **Then, in order:** the client library for apps; the Supabase-to-bag exporter and the importer; the Google Drive recipe; the Vercel entry file; the bundle exporter with the equivalence check; the Supabase adapter if still wanted.
 
 ## 16. Open questions
 
-- **Browser CORS for direct uploads.** Confirm that Dropbox temporary upload links and Drive resumable session URLs accept a browser PUT/POST from the app's origin. If not, files over the proxy limit need a different path (chunked through the gateway on Cloudflare, or upload sessions).
+- **Browser CORS for direct uploads.** Dropbox: confirmed; `content.dropboxapi.com` answers preflights with `Access-Control-Allow-Origin: *` for POST with `Content-Type`. Drive resumable session URLs: still to confirm.
 - **Single-link revocation.** Whether per-campaign generations are enough, or a small revocation list (Cloudflare KV, or a `REVOKED_LINKS` variable of link IDs) is worth adding.
 - **Free-tier headroom.** How much load the Cloudflare free plan carries for a large wedding with hundreds of guests uploading in an evening.
 - **Size limits for the first release.** Proposed: 150 MB per file (Dropbox single-upload limit), with apps nudging guests toward short clips.

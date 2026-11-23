@@ -95,7 +95,10 @@ export class DropboxAdapter implements StorageAdapter {
       },
       body: bytes as Uint8Array<ArrayBuffer>,
     }, path);
-    return toEntry((await res.json()) as DropboxMetadata, path);
+    // files/upload returns bare FileMetadata with no ".tag" (unlike list_folder), so mark it a file.
+    // Re-uploading identical bytes to an existing path in "add" mode is a no-op that returns the
+    // existing file: harmless deduplication, never an overwrite.
+    return toEntry({ ...((await res.json()) as DropboxMetadata), ".tag": "file" }, path);
   }
 
   async delete(path: string): Promise<void> {

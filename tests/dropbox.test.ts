@@ -25,9 +25,12 @@ const notFound = () => new Response(JSON.stringify({ error_summary: "path/not_fo
 
 test("write uses mode add with autorename off, under the configured root", async () => {
   const { calls, adapter } = mockDropbox(() =>
-    Response.json({ ".tag": "file", name: "a.jpg", path_display: "/campaigns/smith/a.jpg", size: 3, content_hash: "h" }),
+    // Real files/upload responses carry no ".tag" field.
+    Response.json({ name: "a.jpg", path_display: "/campaigns/smith/a.jpg", size: 3, content_hash: "h", server_modified: "2026-11-23T02:16:32Z" }),
   );
   const entry = await adapter.write("smith/a.jpg", new TextEncoder().encode("abc"));
+  assert.equal(entry.type, "file");
+  assert.equal(entry.size, 3);
   const arg = JSON.parse(calls[0].headers["dropbox-api-arg"]);
   assert.deepEqual(arg, { path: "/campaigns/smith/a.jpg", mode: "add", autorename: false, mute: true });
   assert.equal(entry.path, "smith/a.jpg");
