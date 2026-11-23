@@ -1,0 +1,21 @@
+# Cloudflare Workers deployment for the FolderStore storage gateway.
+# See docs/setup.md. Secrets (SIGNING_KEY, ADMIN_SECRET, DROPBOX_APP_SECRET,
+# DROPBOX_REFRESH_TOKEN, ...) are never written here; set them with
+# `npx wrangler secret put NAME` or in the Cloudflare dashboard.
+
+name = "folderstore-gateway"
+main = "../../packages/gateway/src/cloudflare.ts"
+compatibility_date = "2026-11-01"
+
+[vars]
+STORAGE_BACKEND = "dropbox"
+# Folder inside the Dropbox app folder (or the Drive folder name) that holds campaigns.
+STORAGE_ROOT = ""
+# The front-end page contributor links open, e.g. "https://you.github.io/PhotoStories/".
+APP_URL = ""
+# Comma-separated browser origins allowed to call the gateway; defaults to APP_URL's origin.
+ALLOWED_ORIGINS = ""
+MAX_UPLOAD_MB = "150"
+MAX_PROXY_UPLOAD_MB = "4"
+# Per-campaign link generation; raise a campaign's number to revoke its links, e.g. {"smith-family": 2}
+LINK_GENERATIONS = "{}"

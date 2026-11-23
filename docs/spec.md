@@ -1,181 +1,282 @@
-# Shared Folder Storage Library — Spec
+# FolderStore — Spec
 
-Working name: **FolderStore** (rename freely). A small, open-source, reusable library that lets small collaborative apps use a shared folder in Dropbox, Google Drive, or a local folder as their data store, with no database backend. First customer: the new Photo Stories app. Intended to serve other Reflection of You apps too.
+A small, open-source storage layer that lets small collaborative apps keep their content in one organizer's Dropbox or Google Drive folder, through a tiny serverless gateway the organizer deploys once. Contributors use only a shared link: no account, no sign-in, no app install. First customers: [Photo Stories](https://github.com/AReflectionOfYou/PhotoStories) and a wedding-memories app (section 11).
 
 Licensing: MIT for code, CC BY 4.0 for this document.
+
+> **Revision note (November 2026).** The first version of this spec had each contributor connect their own Dropbox or Google account to a folder the moderator shared with them. That design was dropped: per-user OAuth scopes, folder-picking, and account requirements made setup too fragile for non-technical family members and wedding guests. This version keeps the storage contract, folder layout, merge rules, and export bundle, and replaces the access model with a gateway holding one owner credential.
 
 ## 1. Goals and non-goals
 
 **Goals**
 
-- Replace a database backend like Supabase for small groups (tens of contributors at most).
-- Make concurrent-edit conflicts between different contributors structurally impossible; make same-contributor, multi-device conflicts explicit and non-destructive rather than silently lost.
-- Keep all data as plain, human-readable files that outlive the app: photos, JSON sidecars, audio.
-- Make storage providers interchangeable behind one small contract.
-- Grant a defined group secure access through each provider's own invitation/sharing mechanism, in a single action by a tech-savvy moderator.
+- Replace a database backend like Supabase for small groups (tens of contributors, a few thousand files).
+- Setup an organizer can finish in under fifteen minutes: one deploy, one storage app, a few pasted values, one Connect click, one link copied.
+- Contributors need nothing but a link in a browser. They never see credentials and never need a Dropbox or Google account.
+- Keep all data as plain, human-readable files in storage the organizer owns: photos, JSON sidecars, audio, video.
+- Make storage providers interchangeable behind one small contract; switching is configuration, not code.
 - Preserve all content: nothing a contributor writes is ever silently lost or overwritten.
 
 **Non-goals**
 
 - Large groups, high write rates, real-time collaboration, or complex queries.
-- Storing family content anywhere except the user's own Dropbox or Google Drive. GitHub holds code only.
-- Anonymous, sign-in-free access. Every contributor has an identity on the chosen provider — see section 3.
+- Per-contributor accounts or identity verification. A link is a bearer credential; whoever holds it acts as that contributor.
+- Storing family content anywhere except the organizer's own storage. GitHub holds code only.
 
 ## 2. Core design principles
 
-1. **One writer per file, enforced by trust and convention, not by storage-level ACLs.** Every contributor writes only inside their own folder. The app never offers the affordance to write elsewhere. Dropbox and Drive sharing grant access to the whole shared folder, so nothing stops a member from writing elsewhere at the provider level — that gap is closed by mutual trust within the group, not by technical enforcement (section 3).
-2. **Append-only, never-overwrite contributions.** `write()` never overwrites an existing file, for anyone, anywhere (section 5). A correction or addition is always a new file. Contributors add new revisions or retract their own entries; nothing is destroyed except through an explicit, recoverable retraction (moved to trash).
+1. **One writer per folder, enforced by the gateway.** Every link carries a contributor ID and may write only under `contributors/<id>/`. (The earlier design could only ask for this by convention; the gateway now enforces it.)
+2. **Append-only, never overwrite.** `write()` never replaces an existing file, for anyone. A correction is a new file. Deletion is moderator-only and always moves to a recoverable trash.
 3. **The folder is the database.** Any index, manifest, or cache is derived and can be rebuilt by scanning the folders.
-4. **Raw sources are preserved; derived products are regenerable.** Photos, audio, and human-confirmed metadata are sources. Thumbnails, indexes, PDFs, and bundles are derived and disposable.
-5. **Adapters are dumb, the core is smart.** Providers implement a tiny, identity-agnostic file contract (list/read/write/delete/changes/getLink). All merge logic, path and identity policy, and conflict handling live in the core.
+4. **Raw sources are preserved; derived products are regenerable.** Photos, audio, and human-confirmed metadata are sources. Thumbnails, indexes, PDFs, and bundles are derived.
+5. **Adapters are dumb, the gateway and core are smart.** Adapters implement a tiny, identity-agnostic file contract. Permissions, path policy, naming, and merging live above them.
+6. **The export bundle is the long-term record.** The backend is replaceable by design; the bundle never depends on it (section 12).
 
-## 3. Identity and access model
+## 3. Roles and architecture
 
-- **Invitation uses each provider's own sharing.** The moderator creates the project root in their own Dropbox or Google Drive and shares it using that provider's native folder-sharing, inviting each contributor by account (email) — one action per person, once.
-- **Identity comes from the provider, not from the library.** Each contributor accepts the share and connects the app with their own account (Dropbox or Google OAuth). `project.json`'s contributor list maps a contributor ID to a display name and that provider account's identity, filled in by the moderator during the same one-time setup.
-- **Trust is the security boundary for write isolation.** Dropbox and Drive sharing both grant access to the whole shared folder tree on an ordinary account, not per-subfolder permissions. The library enforces "write only in your own folder" in application logic, not storage ACLs. This is sufficient because the group is small and its members trust each other. Stated plainly as a residual risk: any invited member could, using the provider's own tools outside this app, write or delete inside another member's folder. Two things already in the design limit the damage of an accident: writes never overwrite (section 5), and deletes always go to trash.
-- **Revocation** removes a contributor from the provider's native share. Files they already wrote remain, as a historical record, consistent with the preservation principle in section 2. Whether anything further is needed app-side is an open question (section 11).
-- **The optional AI proxy (section 8) is not part of this access-control model.** It plays no role in who can read or write the project folder.
+**Roles**
 
-## 4. Folder layout
+- **Organizer (moderator).** One person per deployment, moderately tech-savvy. Deploys the gateway, owns the storage account, makes and shares links.
+- **Contributors.** Family members, friends, wedding guests. Non-technical. Use only a link.
 
-The project owner creates one shared parent folder, the project root, with this structure:
+**Layers**
 
-- `project.json`: project name, creation date, declared end date (optional), schema version, and the contributor list — IDs, display names, and provider account identities.
-- `contributors/<contributor-id>/`: one folder per person. By convention, only that person writes here (section 3).
-  - `items/`: that person's contributions.
-  - `media/`: photos, audio, and video that person uploaded.
-- `derived/`: thumbnails, merged index, caches. Disposable and rebuildable. Written only as new, timestamped snapshots — never overwritten in place (section 7).
-- `exports/`: finished export bundles.
+1. **Web app.** A static front end (GitHub Pages or similar), such as Photo Stories. It knows nothing about which backend is in use; it talks only to the gateway's HTTP API.
+2. **Gateway.** One small serverless function the organizer deploys (Cloudflare Workers first; section 9). Holds the storage credential and signing key as platform secrets. Verifies the contributor link on every request and enforces permissions, paths, sizes, and types.
+3. **Storage adapter.** One module per backend implementing the contract in section 5: Dropbox, Google Drive, a local folder (development), and later Supabase.
 
-**Naming.** Every contribution file is named with its subject, a kind, the contributor ID, and a UTC timestamp, for example `IMG_0412.story.amy.2026-11-16T105200Z.json`. Photos and their sidecars share a root name, as in the current Photo Stories app. If two writes from the same contributor collide on the same timestamp — for example, two devices writing at the same instant — the core library retries with a disambiguating suffix (section 5) rather than failing visibly or overwriting.
+**Why a gateway.** Dropbox and Google APIs act on behalf of an account owner. A browser-only app has no safe place to hold the owner's token, so a small server-side piece is unavoidable. The design goal is to make that piece trivial to deploy and free to run.
+
+## 4. Access model: contributor links
+
+- **A link is a signed token in the URL fragment**: `https://app.example/#fs=<token>`. Browsers never send the fragment to servers, so tokens stay out of server logs and referrers. The app keeps the token in session storage and sends it as `Authorization: Bearer <token>`.
+- **The token is self-verifying.** It holds its claims (campaign, contributor ID, permissions, generation, optional expiry, optional label) and an HMAC-SHA256 signature made with the gateway's `SIGNING_KEY`. The gateway needs no database to check it, which keeps Cloudflare and Vercel deployments identical.
+- **Permissions** are any combination of:
+  - `upload` — write new files under `contributors/<id>/`;
+  - `list` — list files anywhere in the campaign;
+  - `read` — open any file in the campaign.
+
+  A contributor can always read back files under their own folder. Typical links: a family member gets `upload,list,read`; wedding guests share one `upload`-only link; a viewer-only relative gets `list,read`.
+- **Shared links.** One link may be shared by many people (for example `contributor=guests`). They all write to the same folder; unique file names keep them from colliding, and a per-upload sidecar can record a self-reported name and note.
+- **Revocation.**
+  - *One campaign's links:* raise that campaign's number in `LINK_GENERATIONS` (for example `{"smith-family": 2}`). Every link minted at a lower generation stops working immediately; make new ones.
+  - *Everything:* rotate `SIGNING_KEY`.
+  - *Time-limited links:* set an expiry when minting; the link lapses on its own.
+  - Revoking a single link without affecting its campaign's other links is not supported. Small campaigns can afford to reissue; see open questions.
+- **Moderator access** uses a separate `ADMIN_SECRET`, sent as a bearer token by the gateway's setup page. Every `/api/admin/*` route requires it, except the OAuth callback, which is authenticated by a signed, ten-minute `state` value the gateway issued.
 
 ## 5. The storage contract
 
-Every adapter implements exactly these operations. Paths are relative to the project root. Adapters carry no notion of contributor identity or folder ownership — that policy lives entirely in the core (section 2, principle 5).
+Every adapter implements exactly these operations. Paths are relative to the adapter's root, use `/`, and have been normalized by the caller. Adapters know nothing about campaigns, contributors, or permissions.
 
-- `list(path)`: returns entries (name, type, size, modified time, content hash). The hash is required, not optional: adapters without a native hash (e.g., local folder) have the core library compute SHA-256 on write, so import idempotency (section 12.4) always holds regardless of adapter.
-- `read(path)`: returns bytes.
-- `write(path, bytes)`: creates a new file; **always refuses to overwrite an existing file, with no exception.** On a path collision the core library retries with a disambiguated path (see Naming, section 4) rather than surfacing an error, except where the collision is a genuine duplicate write it can detect and skip via the content hash.
-- `delete(path)`: allowed only inside the caller's own folder by convention (section 3); moves to a trash area rather than destroying.
-- `changes(cursor)`: returns what is new or changed since the cursor, plus a new cursor. Adapters without native change feeds fall back to list-and-compare.
-- `getLink(path)`: optional temporary link for media display.
+- `list(path)` — entries (name, type, size, modified time, content hash). The hash is the provider's native one where available (Dropbox `content_hash`, Drive `md5Checksum`), SHA-256 otherwise.
+- `read(path)` — bytes.
+- `write(path, bytes, {contentType})` — creates a new file; **always refuses to overwrite** (throws `PathExistsError`). The core's `writeNoOverwrite` retries with a disambiguating suffix.
+- `delete(path)` — moves to trash (a `.trash/` folder, or the provider's own trash); never destroys.
+- `changes(cursor)` — what is new since the cursor, plus a new cursor. Adapters without a native change feed use list-and-compare.
+- `getLink(path)` — optional short-lived download link for media display; `null` if unsupported.
+- `createUploadTarget(path, {size, contentType, origin})` — optional one-time URL for the browser to upload a large file directly to storage, still refusing to overwrite (section 6.3); `null` if unsupported.
 
-The contract deliberately has no rename, move, lock, or transaction. If an adapter needs more, the design is drifting.
+No rename, move, lock, or transaction. If an adapter needs more, the design is drifting.
 
-## 6. Adapters
+## 6. Gateway and adapters
 
-- **Local folder:** for tests, development, and offline use. Required.
-- **Dropbox:** each contributor connects their own Dropbox account (OAuth) after accepting the moderator's native shared-folder invite. There is no project-owned shared token for ordinary use (see section 8 for the narrower, optional AI-proxy case). Confirm in a prototype exactly which OAuth scope sees a folder shared into the contributor's own account this way.
-- **Google Drive:** contributors sign in with their own Google accounts after accepting the moderator's share. The narrow `drive.file` scope may need each person to pick the shared folder once — verify in a prototype.
-- **Future providers:** anything that can implement section 5.
+The gateway is one web-standard handler (`Request → Response`) with thin per-platform entry files. Routes:
 
-## 7. Merge rules
+| Route | Who | What |
+|---|---|---|
+| `GET /` | anyone | Organizer setup page (holds no secrets; asks for `ADMIN_SECRET`) |
+| `GET /c` | anyone | Minimal contributor page: upload with progress, optional listing |
+| `GET /api/health` | anyone | Backend name and whether storage is connected |
+| `GET /api/session` | link | The link's campaign, contributor, permissions, write prefix, limits |
+| `POST /api/uploads` | link + upload | Plan an upload: `{path, size, contentType}` → proxy or direct target |
+| `PUT /api/files/<path>` | link + upload | Write a small file through the gateway; returns the final path |
+| `GET /api/files?path=` | link + list | List a folder in the campaign |
+| `GET /api/files/<path>` | link + read | Read a file; `?link=1` returns a short-lived URL where supported |
+| `GET /api/admin/status` | admin | Connection state, redirect URI, limits |
+| `POST /api/admin/connect` | admin | Start the storage Connect flow |
+| `GET /api/admin/connect/callback` | signed state | Finish Connect; shows the refresh token to save as a secret |
+| `POST /api/admin/links` | admin | Mint a link: `{campaign, contributor, permissions, label?, expiresInDays?}` |
+| `GET /api/admin/campaigns` | admin | List campaign folders |
+| `GET`/`DELETE /api/admin/files?campaign=&path=` | admin | List, download (`download=1`), or trash a file |
 
-The core library builds one logical view from all contributor folders. Adapters never merge.
+Every request is checked for: a valid token or admin secret; the permission it needs; a normalized path with no `..`, hidden segments, backslashes, or control characters; writes confined to `contributors/<id>/`; the size limit (`MAX_UPLOAD_MB`); and an allowed MIME type (`ALLOWED_TYPES`). The gateway logs one small record per request (route, status, campaign, contributor, byte count) and never logs file contents or tokens.
 
-- **Subject grouping.** Files sharing a subject root name (for example `IMG_0412`) form one item, no matter who wrote them.
-- **Ordering.** Contributions to an item are ordered by their UTC timestamp, then by contributor ID to break ties.
-- **Layering.** The original uploader's data is the base. Other people's notes, tags, and corrections layer on top and are shown with attribution. Nothing is overwritten.
-- **Revisions.** A contributor adds a new timestamped file superseding their own prior one; the prior file stays on disk as visible history, not deleted. A contributor may also retract a file outright, which moves it to trash (recoverable).
-- **Uncertainty.** A contribution may be marked uncertain, such as a guessed name or year. Later contributions can confirm or contradict it.
-- **Rebuildable index, never overwritten.** The merged index in `derived/` is a cache keyed by the change cursor, written as a new timestamped snapshot on every rebuild rather than overwritten in place. Readers use the newest snapshot by name. Concurrent rebuilds from different app instances are harmless — redundant, not conflicting, since derived output is disposable (section 2) — and stale snapshots are garbage-collected periodically (open question, section 11).
+### 6.1 Dropbox adapter (built first)
 
-## 8. Optional AI proxy
+- A Dropbox app with **App folder** access, so the gateway can see only `Apps/<app name>/` in the organizer's Dropbox, never the whole account.
+- OAuth with `token_access_type=offline`: one Connect click yields a long-lived refresh token; the adapter exchanges it for short-lived access tokens and refreshes once on a 401.
+- Writes use `mode: add, autorename: false`, so Dropbox itself refuses to overwrite.
+- Plain `fetch`, no SDK, so it runs on Workers. Non-ASCII file names are escaped in the `Dropbox-API-Arg` header as Dropbox requires.
 
-A small, optional serverless component, specified here but built and deployed separately from the library. It is not part of the access-control model (section 3 covers that); its only job is keeping AI service credentials server-side.
+### 6.2 Google Drive adapter (built second)
 
-- **What it holds.** API keys for AI services (transcription, follow-up questions). These never reach the browser.
-- **What it does.** Proxies calls to those AI services on the app's behalf.
-- **Metering.** Per-project caps on AI usage, with an optional bring-your-own-keys setting.
-- **Self-hosters.** Can skip this entirely and call AI services with their own keys.
-- **Not required for storage access.** Storage access is granted by each provider's native sharing (section 3); this component plays no role in it.
+- **OAuth with the narrow `drive.file` scope**, publishing the OAuth client to **In production**. `drive.file` is a non-sensitive scope, so no Google verification is required, and refresh tokens do not expire after seven days the way they do in Testing mode.
+- With `drive.file` the gateway sees only what it created. It creates one top-level folder (`STORAGE_ROOT`, default `FolderStore`) in the organizer's My Drive on first use and keeps everything inside it. Pointing at a pre-existing folder is not supported under this scope.
+- **Why not a service account** (the earlier recommendation): service accounts have no Drive storage quota of their own, so uploads into an ordinary Gmail user's folder fail; working around that needs Shared Drives or domain-wide delegation, both Google Workspace features most families do not have.
+- Drive permits duplicate names, so never-overwrite is check-then-create. Two simultaneous writes to the same new path could both land as same-named siblings: nothing is lost, and the naming scheme makes it vanishingly rare.
+- Delete sets `trashed: true` (Drive's own recoverable trash).
 
-## 9. First customer: Photo Stories
+### 6.3 Large files and direct upload
 
-Photo Stories maps onto the library like this.
+Platform request-body limits rule out sending big files through the gateway: about 4.5 MB on Vercel, 100 MB on Cloudflare's free plan. So:
 
-- **Project.** One "campaign" is one project root, with a beginning and a declared end.
-- **Photos and metadata.** Each photo goes in its uploader's `media/` folder. Metadata is embedded in the image where possible, with the rest in a sidecar that shares the photo's root name. This matches the current app.
-- **Stories and spoken descriptions.** Audio is kept as a source file next to its transcript. The transcript is derived and can be regenerated.
-- **Corrections and additions.** Another family member's note about a photo, such as "this is actually Aunt Rose", is a new file in their own folder, layered on the original by the merge rules.
-- **People list.** The shared family people list with aliases is a contribution file like any other. Changes are new files, and the merge picks the latest per person.
-- **Face tags.** Confirmed tags are sources. Suggestions are derived.
+- Files up to `MAX_PROXY_UPLOAD_MB` (default 4) go through the gateway (`PUT /api/files/...`), where size and type are checked exactly.
+- Larger files get a **direct upload target** from `POST /api/uploads`: a Dropbox temporary upload link (POST, single use, up to 150 MB, commit mode `add`) or a Google Drive resumable session URL (PUT). The browser sends the bytes straight to storage; the gateway spends a few milliseconds of CPU no matter how big the file is.
+- The gateway checks the declared size and type before issuing a target. It cannot see the actual bytes of a direct upload, so the declared size is trusted up to the provider's own limit.
+- On a name collision a direct upload fails with 409; the client retries with a disambiguated name.
+- Files over 150 MB on Dropbox need upload sessions, which are not supported yet.
 
-## 10. Export bundle and succession
+### 6.4 Local adapter
 
-- **At the declared end,** the app writes one zipped BagIt bundle, as specified in section 12, to `exports/`: all photos, sidecars, audio, and stories, checksummed manifests, and a single browsable HTML file, with PDF export for printing available from that file.
-- **The bundle needs nothing.** No app, no gateway, no account. Unzip, open the HTML file, and verify integrity against the manifests.
-- **Ownership.** The bundle belongs to the group that commissioned the project. The project account can be handed over or closed.
-- **Reimport.** A closed project can seed a new one through the import contract in section 12.4, which uses the metadata in the bundle to rebuild the folder structure.
-- **Backups.** The project folder is copied to a second location periodically.
+For tests and for running the gateway on your own machine (`npm run dev`). Files land in a folder; trash is `.trash/`. No direct uploads.
 
-## 11. Open questions
+### 6.5 Supabase adapter (planned)
 
-- **Dropbox OAuth scope for shared folders.** Confirm which scope lets a contributor's own account see a folder the moderator shared into it via native Dropbox sharing.
-- **Google Drive permissions.** Does the narrow `drive.file` scope let contributors see a folder another person shared with them, or must each person pick it once? Build a small prototype to find out.
-- **Change feeds.** How reliable are the Dropbox cursor and the Drive changes feed for a folder of a few thousand small files?
-- **Naming.** FolderStore is a placeholder. Choose a final name before the first public release.
-- **Hosting the AI proxy.** Which serverless host, and who pays, if it's used at all.
-- **Rotation and recovery.** What does the owner do if the project account or moderator access is lost? Define a minimum recovery checklist.
-- **Revocation follow-through.** Whether removing a contributor's provider-level share access needs any additional app-side step, such as marking them inactive in `project.json`.
-- **`derived/` garbage collection.** A simple rule for pruning stale index snapshots (age-based, or keep-newest-N) so the folder doesn't grow unbounded.
+Wraps a Supabase Storage bucket behind the same contract, using the service-role key held in the gateway. Existing Supabase apps (the current Photo Stories, the wedding uploader) migrate through the bundle importer (section 12.5) rather than by running the old schema behind the gateway.
 
-## 12. Import and export (bundle as hub)
+## 7. Organizer setup experience
 
-Import and export are first-class operations of the library, usable by any app, not just Photo Stories. The bundle is the hub: every source exports to a bundle, and every destination imports from one. Moving content from Supabase to Dropbox is two steps, a Supabase exporter that writes a bundle and the library's importer that unpacks it.
+The README links a short, prescriptive recipe per backend ([setup.md](setup.md)). The shape is the same for each:
 
-### 12.1 Bundle format: zipped BagIt
+1. Generate a `SIGNING_KEY` and `ADMIN_SECRET` (`npm run cli -- secrets`).
+2. Deploy the gateway (section 9) and paste those two values, plus the storage app's key and secret, into its secrets.
+3. Create the storage app and register the gateway's redirect URI, `https://<gateway>/api/admin/connect/callback`, which the setup page displays.
+4. Open the gateway, enter the admin secret, click **Connect**, approve once.
+5. Paste the refresh token the gateway shows into its secrets (the gateway cannot write its own secrets on either platform), then reload.
+6. Make a link and share it.
 
-The bundle is a [BagIt](https://www.rfc-editor.org/rfc/rfc8493) bag, the Library of Congress digital-preservation packaging format, delivered as a zip. This is the format the current Photo Stories app already uses.
+### 7.1 Dropbox Connect
 
-- **Declaration.** `bagit.txt` at the top level states the BagIt version and encoding.
-- **Payload.** A `data/` directory holds the content, laid out like the live project from section 4: contributor folders, media, sidecars, audio, and `project.json`.
-- **Manifests.** `manifest-sha256.txt` lists a checksum for every payload file, so anyone can verify years later that nothing has changed or gone missing. A tag manifest covers the files outside `data/`.
-- **Bag metadata.** `bag-info.txt` records the project name, source organization, dates, bundling software and version, and payload size.
-- **Self-describing.** The bundle needs no app, no gateway, and no account.
+Values: `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, then `DROPBOX_REFRESH_TOKEN` after Connect.
 
-### 12.2 Browsable HTML file
+### 7.2 Google Drive Connect
 
-Every bundle includes one HTML file, `index.html`, at the top level beside `bagit.txt`, so it opens straight from the unzipped folder in any web browser.
+Values: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (a "Web application" OAuth client with the redirect URI above, published In production), then `GOOGLE_REFRESH_TOKEN` after Connect.
 
-- **Single file.** All code and styling are inline, with no external dependencies and no network access needed.
-- **Embedded data.** The merged metadata, stories, captions, people list, and attributions are embedded in the file itself, so browsing works with nothing else.
-- **Media by relative path.** Photos, audio, and video load from `data/` by relative path, so the HTML file stays small.
-- **Features.** Browse by contributor, event, person, and date; view a photo with its story and everyone's layered contributions; export selected items to PDF for printing via the browser's own print-to-PDF, using a print stylesheet — no embedded PDF library, so the "no external dependencies, no network access" promise holds.
-- **Derived.** The HTML file can always be regenerated from the payload. The payload is the source of truth, and the file is a convenience that must also keep working untouched for decades.
-- **Integrity.** The file lists the bag's checksums so a viewer can flag a missing or altered file.
+## 8. Configuration
 
-### 12.3 Export contract
+All configuration is environment variables and secrets; switching backends changes configuration only.
 
-An exporter reads from any source and writes a bag. Exporters are provider-specific; the bag they produce is not.
+| Name | Kind | Meaning |
+|---|---|---|
+| `STORAGE_BACKEND` | var | `dropbox`, `gdrive`, or `local` (dev server only) |
+| `STORAGE_ROOT` | var | Folder inside the Dropbox app folder, or the Drive top-level folder name |
+| `SIGNING_KEY` | secret | ≥ 32 characters; signs links and OAuth state |
+| `ADMIN_SECRET` | secret | ≥ 16 characters; the organizer's password for the setup page |
+| `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` | secret | Dropbox backend |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` | secret | Drive backend |
+| `APP_URL` | var | Front-end page links open; defaults to the gateway's own `/c` page |
+| `ALLOWED_ORIGINS` | var | Comma-separated origins allowed by CORS; defaults to `APP_URL`'s origin, or `*` |
+| `MAX_UPLOAD_MB` | var | Largest file accepted at all (default 150) |
+| `MAX_PROXY_UPLOAD_MB` | var | Largest file sent through the gateway itself (default 4) |
+| `ALLOWED_TYPES` | var | MIME patterns, default `image/*,video/*,audio/*,application/json,text/plain,text/vtt` |
+| `LINK_GENERATIONS` | var | JSON map of campaign → current link generation, default `{}` |
 
-- Whole project, or a slice such as one contributor, one event, or one date range. Slices are valid bags and note their scope in `bag-info.txt`.
-- Contributor attribution and original timestamps are written into the payload exactly as they stand in the source.
-- Export is read-only against the source and can be repeated at any time.
+## 9. Deployment targets
 
-### 12.4 Import contract
+**One core, thin entry files.** All logic is in `packages/gateway/src/handler.ts`. Each platform has a small entry file that builds the handler from its environment.
 
-An importer reads a bag and writes into any storage adapter.
+- **Cloudflare Workers (first).** Entry `packages/gateway/src/cloudflare.ts`, config `deploy/cloudflare/wrangler.toml`. The free plan has no non-commercial restriction, so it suits organizers who receive paid setup help. Free-plan limits to document: about 100,000 requests per day and 10 ms of CPU per request (the gateway does little CPU work, since large bytes go direct to storage), with a 100 MB request body cap. The bundle is about 20 KB gzipped.
+- **Vercel (later).** An easier first deploy and dashboard, but the free Hobby plan is for personal, non-commercial use only: an organizer deploying for their own family is fine, but a deployment done for pay is not. The README must say so plainly. Functions accept about 4.5 MB per request, which the default `MAX_PROXY_UPLOAD_MB` already respects.
+- **Node (development).** `npm run dev` runs the same handler with the local adapter, or with a real backend via `.dev.vars`.
+- **Verify limits before release.** Free-tier numbers change; check them when writing the setup recipes.
 
-- **Verify first.** Check the manifests before writing anything, and report any mismatch.
-- **Never overwrite.** Imported material lands in contributor folders as new files, so the append-only and one-writer rules hold from day one.
-- **Preserve attribution and time.** Each person's material goes into their own folder with original timestamps, not the import date.
-- **Safe to re-run.** Every file carries a content hash, guaranteed by every adapter (section 5), so running the same import twice creates no duplicates.
-- **Merging into an existing project.** Contributor IDs are mapped explicitly, and the owner confirms the mapping before anything is written.
-- **Reseeding.** A closed project's bag can seed a new project, carrying the metadata needed to rebuild the folder structure.
+## 10. Folder layout, naming, and merge rules
 
-### 12.5 Outside importers
+### 10.1 Layout
 
-Importers for outside sources feed the same pipeline by first producing a bag.
+Under the storage root, each campaign is one folder named by its slug:
 
-- **Supabase exporter (first migration tool).** Reads the current Photo Stories data from Supabase, including photos, stories, audio, people, and contributor attributions, and writes a bag. The library's importer then unpacks it into Dropbox or Google Drive.
-- **Plain folder importer.** Wraps a folder of already-scanned photos, with optional sidecars, into a bag.
-- **Provider-to-provider moves.** Dropbox to Drive, or either to a local folder, run as export then import.
+- `<campaign>/project.json` — campaign name, dates, schema version, contributor display names (written by the app or the organizer).
+- `<campaign>/contributors/<contributor-id>/` — one folder per link's contributor ID; only that link writes here.
+  - `media/` — photos, audio, video.
+  - `items/` — stories, notes, corrections, tags (JSON).
+- `<campaign>/derived/` — thumbnails, merged indexes, caches; disposable, written as new timestamped snapshots. Written by the organizer's tools, not by contributor links.
+- `<campaign>/exports/` — finished bundles.
+- `.trash/` — at the storage root; trashed files, mirroring their original paths.
 
-### 12.6 Open questions for import and export
+### 10.2 Naming
 
-- **Large media.** Zip limits and memory use for bags with tens of gigabytes. Consider splitting into several bags, with a parent index.
-- **BagIt profile.** Whether to define a small BagIt profile so the library's bags are recognizable and strictly validated.
-- **Slice bags and the HTML file.** Whether slice bags carry their own browsable HTML or only the full bag does.
-- **Supabase schema coverage.** Confirm every table and storage bucket the current app uses is covered by the exporter before relying on it for the migration.
+Each photo has a sidecar sharing its root name, holding metadata not written into the photo itself (as in the current Photo Stories app). Contribution files are named `<subject>.<kind>.<contributor>.<UTC timestamp>.<ext>`, for example `IMG_0412.story.amy.2026-11-16T105200Z.json`. On a collision the core retries with a short random suffix before the extension rather than failing or overwriting.
+
+### 10.3 Merge rules
+
+The core builds one logical view from all contributor folders; adapters never merge.
+
+- **Subject grouping.** Files sharing a subject root name form one item, whoever wrote them.
+- **Ordering.** By UTC timestamp, then contributor ID.
+- **Layering.** The original uploader's data is the base; others' notes, tags, and corrections layer on top with attribution. Nothing is overwritten.
+- **Revisions.** A new timestamped file supersedes the same contributor's earlier one; the earlier file stays as history.
+- **Uncertainty.** A contribution may be marked uncertain; later contributions can confirm or contradict it.
+- **Rebuildable index.** The merged index in `derived/` is a cache written as a new snapshot on each rebuild; readers use the newest.
+
+## 11. Customers
+
+### 11.1 Photo Stories
+
+- One campaign per family project, with a beginning and a declared end.
+- Each family member gets their own link (`upload,list,read`) with their own contributor ID, so attribution and the merge rules work unchanged.
+- Photos go in the uploader's `media/`; metadata is embedded where possible, the rest in a sidecar sharing the photo's root name.
+- Spoken stories are kept as audio source files beside their transcripts (derived).
+- Corrections ("this is actually Aunt Rose") are new files in the corrector's folder, layered by the merge rules.
+- AI transcription and suggestions stay outside the storage gateway (a separate optional proxy holding AI keys); they are not part of the access model.
+
+### 11.2 Wedding memories
+
+- One campaign per wedding (or per event in it).
+- Guests share one `upload`-only link (contributor `guests`), shown as a QR code at the event. They cannot list or see anyone else's uploads, matching the current Supabase uploader's privacy model.
+- Each upload gets a sidecar with the original file name, capture time if known, and an optional self-reported name and note.
+- The couple gets a full link, or browses with the organizer page; the memories site is built from the campaign folder or its export bundle afterwards.
+- Videos are the common large-file case, so this app exercises the direct-upload path (section 6.3) most.
+
+## 12. Export bundle and import
+
+Unchanged from the first spec in substance. The bundle is the hub: every source exports to one and every destination imports from one.
+
+- **Format.** A zipped [BagIt](https://www.rfc-editor.org/rfc/rfc8493) bag: `bagit.txt`, a `data/` payload laid out like the live campaign (section 10.1), `manifest-sha256.txt`, a tag manifest, and `bag-info.txt` (campaign, organization, dates, bundling software, payload size).
+- **Browsable HTML.** One self-contained `index.html` beside `bagit.txt`: inline code and styles, embedded metadata, media by relative path, browse by contributor/event/person/date, print-to-PDF via a print stylesheet. It must keep working untouched for decades and can always be regenerated from the payload.
+- **The bundle needs nothing**: no app, gateway, or account. Unzip, open, verify against the manifests.
+- **Export** reads any source and writes a bag, whole campaign or a slice (one contributor, event, or date range). Read-only and repeatable. Runs with the organizer's access (admin routes or a local tool), never through a contributor link.
+- **Import** verifies manifests first, never overwrites, preserves attribution and original timestamps, is safe to re-run (content hashes), and asks the organizer to confirm contributor-ID mapping when merging into an existing campaign.
+- **Outside importers** produce a bag first: a Supabase exporter (the migration path for the current Photo Stories and wedding uploader), a plain-folder importer, and provider-to-provider moves (export, then import).
+- **Equivalence check.** Exporting the same campaign from two backends must produce identical `manifest-sha256.txt` payload entries. The zip files themselves will differ (timestamps inside the archive).
+
+## 13. Security notes
+
+- Storage credentials, the signing key, and the admin secret live only in the gateway's secret store, never in the front end or the repository.
+- All paths are normalized and confined server-side; contributor writes are confined to their own folder.
+- Links are scoped to one campaign, carry only the permissions minted into them, never grant delete, and travel in the URL fragment.
+- The setup page and OAuth callback send `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, and refuse framing.
+- Rate limiting is limited to per-file size and type checks. Platform-wide request limits and link expiry are the main brakes on abuse of a leaked link. A leaked link is handled by bumping its campaign's generation.
+
+## 14. Licensing and notices
+
+- Code under MIT, documents and visual content under CC BY 4.0, with a footer line saying which license covers what.
+- Apps built on FolderStore carry a small, plain notice on the main screen, "© 2026 Michael A. Heroux", linking to the MIT and CC BY 4.0 licenses, subtle enough not to draw attention.
+
+## 15. Tracer bullet and build order
+
+The tracer bullet is Dropbox, Cloudflare Workers, and signed links with no expiry.
+
+1. Create a Dropbox app with App folder access; note its key and secret; register the gateway's redirect URI.
+2. Deploy the gateway to Cloudflare Workers with `SIGNING_KEY`, `ADMIN_SECRET`, `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`.
+3. Open the setup page, click Connect Dropbox, approve, and save the refresh token as `DROPBOX_REFRESH_TOKEN`.
+4. Make a link; upload a photo through the gateway's `/c` page; confirm it lands in the app folder.
+5. Upload a video over 4 MB; confirm it goes direct to Dropbox.
+6. Point Photo Stories (or the wedding uploader) at the gateway with `APP_URL` and upload through it.
+
+**Status (2026-11-22):** steps 1–5 verified on a real Dropbox account and Cloudflare deploy: proxied and direct uploads, read-back, listing, upload-only guest links refused for listing and for writing outside their folder, and never-overwrite on both paths (a same-name write with different bytes is disambiguated; identical bytes are a Dropbox no-op; a direct upload onto an existing name fails with 409). Step 6 waits on the client library. The Drive adapter is still untested against a real account.
+
+**Then, in order:** the client library for apps; the Supabase-to-bag exporter and the importer; the Google Drive recipe; the Vercel entry file; the bundle exporter with the equivalence check; the Supabase adapter if still wanted.
+
+## 16. Open questions
+
+- **Browser CORS for direct uploads.** Dropbox: confirmed; `content.dropboxapi.com` answers preflights with `Access-Control-Allow-Origin: *` for POST with `Content-Type`. Drive resumable session URLs: still to confirm.
+- **Single-link revocation.** Whether per-campaign generations are enough, or a small revocation list (Cloudflare KV, or a `REVOKED_LINKS` variable of link IDs) is worth adding.
+- **Free-tier headroom.** How much load the Cloudflare free plan carries for a large wedding with hundreds of guests uploading in an evening.
+- **Size limits for the first release.** Proposed: 150 MB per file (Dropbox single-upload limit), with apps nudging guests toward short clips.
+- **Multiple organizers.** Whether one campaign can have more than one organizer. Today the admin secret can be shared, which is all-or-nothing.
+- **Deploy button.** Whether Cloudflare's deploy button works with this monorepo layout, or a small template repository is needed.
+- **Naming.** FolderStore is a placeholder; choose a final name before the first public release.
+- **`derived/` garbage collection.** A simple pruning rule (age-based, or keep newest N).

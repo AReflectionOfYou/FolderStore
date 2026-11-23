@@ -1,0 +1,16 @@
+{
+  "name": "@folderstore/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./cloudflare": "./src/cloudflare.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@folderstore/core": "*",
+    "@folderstore/adapter-dropbox": "*",
+    "@folderstore/adapter-gdrive": "*"
+  }
+}

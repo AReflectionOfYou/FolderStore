@@ -1,12 +1,11 @@
 {
-  "name": "@folderstore/web",
+  "name": "@folderstore/dev-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "dependencies": {
     "@folderstore/core": "*",
     "@folderstore/adapter-local": "*",
-    "@folderstore/adapter-dropbox": "*",
-    "@folderstore/adapter-gdrive": "*"
+    "@folderstore/gateway": "*"
   }
 }

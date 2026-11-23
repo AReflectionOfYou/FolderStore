@@ -7,13 +7,16 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "tsx apps/dev-gateway/src/server.ts",
     "cli": "tsx apps/cli/src/index.ts",
-    "web": "tsx apps/web/src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "deploy:cloudflare": "wrangler deploy --config deploy/cloudflare/wrangler.toml"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "wrangler": "^4.166.0"
   }
 }

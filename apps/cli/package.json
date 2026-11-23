@@ -5,8 +5,6 @@
   "type": "module",
   "dependencies": {
     "@folderstore/core": "*",
-    "@folderstore/adapter-local": "*",
-    "@folderstore/adapter-dropbox": "*",
-    "@folderstore/adapter-gdrive": "*"
+    "@folderstore/adapter-local": "*"
   }
 }
