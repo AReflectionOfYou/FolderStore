@@ -1,63 +1,67 @@
 # FolderStore
 
-A small, open-source library that lets small collaborative apps use a shared
-folder in Dropbox, Google Drive, or a local folder as their data store, with
-no database backend. First customer: the
-[Photo Stories](https://github.com/AReflectionOfYou/PhotoStories) app.
+A small, open-source storage layer that lets small collaborative apps keep
+their content in one organizer's Dropbox or Google Drive folder. A tiny
+serverless gateway, which the organizer deploys once, holds the only key to
+that storage. Contributors use only a shared link: no account, no sign-in,
+no install.
 
-See [docs/spec.md](docs/spec.md) for the full design.
+First customers: [Photo Stories](https://github.com/AReflectionOfYou/PhotoStories)
+and a wedding-memories app. See [docs/spec.md](docs/spec.md) for the full design
+and [docs/setup.md](docs/setup.md) for the organizer's setup recipe.
 
 Part of the [A Reflection of You](https://github.com/AReflectionOfYou)
 collection.
 
+## How it works
+
+```
+ contributor's browser ──link token──▶  gateway (Cloudflare Worker)  ──owner token──▶  Dropbox / Google Drive
+        │                                  verifies link, path, size, type                     ▲
+        └──────────── large files go straight to storage via a one-time upload URL ───────────┘
+```
+
+- **Links** are signed tokens carrying a campaign, a contributor ID, and
+  permissions (`upload`, `list`, `read`). The gateway checks the signature;
+  there is no database.
+- **Each contributor writes only in their own folder**, and **nothing is ever
+  overwritten**. Deleting is organizer-only and goes to trash.
+- **The folder is the database**: plain files and JSON sidecars that outlive any app.
+
 ## Status
 
-Early prototype. The storage contract, a local-folder adapter, a Dropbox
-adapter, and a Google Drive adapter exist; the cloud adapters are structurally
-complete but not yet exercised against real accounts (see docs/spec.md,
-section 11, for the open questions that prototyping is meant to answer).
+Prototype, being rebuilt around the gateway (spec revision, November 2026).
+Working and tested locally: the gateway, signed links, the local-folder
+adapter, the dev server, and the CLI. The Dropbox adapter is tested against
+a mocked API. Dropbox and Google Drive are not yet verified against real
+accounts; spec section 15 lists the tracer-bullet steps that will do that.
 
 ## Layout
 
-- `packages/core` — the storage contract, types, and the shared logic (hash,
-  naming/collision handling, merge rules, OAuth helper, credential storage).
-  Adapters are deliberately dumb; this is where the smart part lives.
-- `packages/adapter-local` — local-folder adapter. No external dependencies.
-- `packages/adapter-dropbox` — Dropbox adapter.
-- `packages/adapter-gdrive` — Google Drive adapter.
-- `apps/cli` — a command-line tool for exercising list/read/write/delete/changes
-  against any adapter, and for running the OAuth flows.
-- `apps/web` — a minimal local web app with the same operations, for a more
-  visual way to poke at an adapter.
+- `packages/core`: the storage contract, path safety, signed link tokens,
+  naming and collision handling, merge rules. Web-standard APIs only; runs
+  anywhere.
+- `packages/gateway`: the HTTP handler, configuration, the organizer setup
+  page, a minimal contributor page, and the Cloudflare Workers entry.
+- `packages/adapter-dropbox`, `packages/adapter-gdrive`: fetch-based
+  adapters plus each provider's Connect flow.
+- `packages/adapter-local`: local-folder adapter for tests and development.
+- `apps/dev-gateway`: runs the gateway on your machine with Node.
+- `apps/cli`: makes secrets, mints and checks links, and drives the local adapter.
+- `deploy/cloudflare`: `wrangler.toml` for deploying the gateway.
+- `tests`: `npm test`.
 
 ## Getting started
 
-See [docs/setup.md](docs/setup.md) for registering a Dropbox app or a Google
-Drive OAuth client before connecting those adapters.
-
 ```sh
 npm install
-
-# Local adapter — no account needed
-npm run cli -- --provider local --root ./sandbox list
-npm run cli -- --provider local --root ./sandbox write hello.txt ./README.md
-npm run cli -- --provider local --root ./sandbox list
-
-# Dropbox — see docs/setup.md for how to register an app and get an app key
-npm run cli -- auth-dropbox --app-key <your-app-key>
-npm run cli -- --provider dropbox --root /FolderStoreTest list
-
-# Google Drive — see docs/setup.md for how to register an OAuth client
-npm run cli -- auth-gdrive --client-id <your-client-id> --client-secret <your-client-secret>
-npm run cli -- --provider gdrive --root-folder-id <a-drive-folder-id> list
-
-# Web prototype
-npm run web
-# then open http://localhost:4848
+npm test
+npm run dev          # gateway on http://localhost:8787, files in ./sandbox
 ```
 
-Tokens from `auth-dropbox` / `auth-gdrive` are saved to `.folderstore/credentials.json`
-in the current directory (gitignored) and used by both the CLI and the web app.
+Open http://localhost:8787 and enter the admin secret the dev server prints.
+Then make a link and open it to upload. To deploy for real, follow
+[docs/setup.md](docs/setup.md).
 
 ## License
 

@@ -3,3 +3,6 @@ dist/
 .folderstore/
 *.log
 .DS_Store
+.dev.vars
+sandbox/
+.wrangler/

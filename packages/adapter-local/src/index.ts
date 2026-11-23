@@ -1,11 +1,11 @@
 import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
-import type { ChangesResult, Entry, StorageAdapter } from "@folderstore/core";
+import type { ChangesResult, Entry, StorageAdapter, UploadTarget } from "@folderstore/core";
 import { NotFoundError, PathExistsError, sha256Hex } from "@folderstore/core";
 
 const TRASH_DIR = ".trash";
 
-/** For tests, development, and offline use (spec section 6). */
+/** For tests, development, and running a gateway on your own machine (spec section 6.4). */
 export class LocalAdapter implements StorageAdapter {
   constructor(private readonly root: string) {}
 
@@ -81,8 +81,13 @@ export class LocalAdapter implements StorageAdapter {
     return { entries, cursor: new Date().toISOString() };
   }
 
-  async getLink(path: string): Promise<string | null> {
-    return `file://${this.resolve(path)}`;
+  async getLink(_path: string): Promise<string | null> {
+    // A file:// URL is useless to a browser talking to a gateway; the gateway proxies reads instead.
+    return null;
+  }
+
+  async createUploadTarget(): Promise<UploadTarget | null> {
+    return null;
   }
 
   private async describe(path: string): Promise<Entry> {
@@ -97,7 +102,7 @@ export class LocalAdapter implements StorageAdapter {
       type: "file",
       size: info.size,
       modifiedAt: info.mtime.toISOString(),
-      contentHash: sha256Hex(bytes),
+      contentHash: await sha256Hex(bytes),
     };
   }
 

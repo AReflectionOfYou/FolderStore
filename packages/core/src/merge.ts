@@ -19,7 +19,7 @@ export function parseContribution(entry: Entry): ParsedContribution | null {
   return { entry, subject, kind, contributorId, timestamp };
 }
 
-/** Spec section 7: group by subject, order by timestamp then contributor ID. */
+/** Spec section 10.3: group by subject, order by timestamp then contributor ID. */
 export function groupBySubject(entries: Entry[]): Map<string, ParsedContribution[]> {
   const groups = new Map<string, ParsedContribution[]>();
   for (const entry of entries) {
@@ -37,7 +37,7 @@ export function groupBySubject(entries: Entry[]): Map<string, ParsedContribution
   return groups;
 }
 
-/** Spec section 7: the newest-named derived/ snapshot wins; concurrent rebuilds are redundant, not conflicting. */
+/** Spec section 10.3: the newest-named derived/ snapshot wins; concurrent rebuilds are redundant, not conflicting. */
 export function latestDerivedSnapshot(entries: Entry[]): Entry | null {
   if (entries.length === 0) return null;
   return [...entries].sort((a, b) => b.path.localeCompare(a.path))[0];

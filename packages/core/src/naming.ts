@@ -1,4 +1,4 @@
-// Contribution filenames follow spec section 4:
+// Contribution filenames follow spec section 10.2:
 //   <subject>.<kind>.<contributorId>.<UTC timestamp>.<ext>
 // e.g. IMG_0412.story.amy.2026-11-16T105200Z.json
 

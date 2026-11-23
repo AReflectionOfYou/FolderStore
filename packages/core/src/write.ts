@@ -1,15 +1,15 @@
-import type { StorageAdapter, Entry } from "./contract.js";
+import type { StorageAdapter, Entry, WriteOptions } from "./contract.js";
 import { PathExistsError } from "./errors.js";
 import { disambiguate } from "./naming.js";
 
-export interface WriteNoOverwriteOptions {
+export interface WriteNoOverwriteOptions extends WriteOptions {
   maxRetries?: number;
   /** Produces a short, random disambiguating suffix on each retry. */
   disambiguator?: () => string;
 }
 
 /**
- * Spec section 4/5: write() never overwrites. On a path collision — most
+ * Spec sections 5 and 10.2: write() never overwrites. On a path collision — most
  * often the same contributor writing from two devices at once — retry with a
  * disambiguated name instead of failing visibly or clobbering the original.
  */
@@ -25,7 +25,7 @@ export async function writeNoOverwrite(
   let candidate = path;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await adapter.write(candidate, bytes);
+      return await adapter.write(candidate, bytes, { contentType: opts.contentType });
     } catch (err) {
       if (err instanceof PathExistsError && attempt < maxRetries) {
         candidate = disambiguate(path, disambiguator());
@@ -35,4 +35,9 @@ export async function writeNoOverwrite(
     }
   }
   throw new PathExistsError(path);
+}
+
+/** The disambiguated path writeNoOverwrite would try next, for direct uploads that collide. */
+export function nextCandidatePath(path: string, disambiguator = () => Math.random().toString(36).slice(2, 8)): string {
+  return disambiguate(path, disambiguator());
 }
