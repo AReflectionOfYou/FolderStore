@@ -266,9 +266,9 @@ The tracer bullet is Dropbox, Cloudflare Workers, and signed links with no expir
 5. Upload a video over 4 MB; confirm it goes direct to Dropbox.
 6. Point Photo Stories (or the wedding uploader) at the gateway with `APP_URL` and upload through it.
 
-**Status (2026-11-22):** steps 1–5 verified on a real Dropbox account and Cloudflare deploy: proxied and direct uploads, read-back, listing, upload-only guest links refused for listing and for writing outside their folder, and never-overwrite on both paths (a same-name write with different bytes is disambiguated; identical bytes are a Dropbox no-op; a direct upload onto an existing name fails with 409). Step 6 waits on the client library. The Drive adapter is still untested against a real account.
+**Status (2026-11-22):** steps 1–5 verified on a real Dropbox account and Cloudflare deploy: proxied and direct uploads, read-back, listing, upload-only guest links refused for listing and for writing outside their folder, and never-overwrite on both paths (a same-name write with different bytes is disambiguated; identical bytes are a Dropbox no-op; a direct upload onto an existing name fails with 409). The browser client (`packages/client`) is built and verified against the same live deployment, including a same-name direct-upload collision; step 6 is now wiring an app to it. The Drive adapter is still untested against a real account.
 
-**Then, in order:** the client library for apps; the Supabase-to-bag exporter and the importer; the Google Drive recipe; the Vercel entry file; the bundle exporter with the equivalence check; the Supabase adapter if still wanted.
+**Then, in order:** wiring Photo Stories and the wedding uploader to the client; the Supabase-to-bag exporter and the importer; the Google Drive recipe; the Vercel entry file; the bundle exporter with the equivalence check; the Supabase adapter if still wanted.
 
 ## 16. Open questions
 
